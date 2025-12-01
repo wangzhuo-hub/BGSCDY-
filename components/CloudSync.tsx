@@ -19,7 +19,8 @@ export const CloudSaveModal: React.FC<CloudSaveModalProps> = ({ isOpen, onClose,
 
     if (!isOpen) return null;
 
-    const generateFilename = () => {
+    // Generate Human Readable Filename for Display
+    const generateDisplayFilename = () => {
         const now = new Date();
         const timeStr = now.getFullYear().toString() +
             (now.getMonth() + 1).toString().padStart(2, '0') +
@@ -27,9 +28,8 @@ export const CloudSaveModal: React.FC<CloudSaveModalProps> = ({ isOpen, onClose,
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0');
         
-        // Remove obviously bad characters for display, but main sanitization happens in service via encoding
-        const safeName = (name || 'Unknown').trim();
-        const safeNote = (note || 'Backup').trim();
+        const safeName = (name || '未命名').trim();
+        const safeNote = (note || '快照').trim();
         
         return `${safeName}_${timeStr}_${safeNote}.json`;
     };
@@ -37,7 +37,10 @@ export const CloudSaveModal: React.FC<CloudSaveModalProps> = ({ isOpen, onClose,
     const handleSave = async () => {
         setIsLoading(true);
         setError('');
-        const filename = generateFilename();
+        
+        // Pass logical name, service will handle hex encoding
+        const filename = generateDisplayFilename();
+        
         const { success, message } = await backupToCloud(
             appState, 
             appState.settings.supabaseUrl, 
@@ -90,7 +93,7 @@ export const CloudSaveModal: React.FC<CloudSaveModalProps> = ({ isOpen, onClose,
                     </div>
                     <div className="bg-slate-50 p-3 rounded text-xs text-slate-500 break-all font-mono">
                         <span className="block font-bold mb-1 text-slate-400">文件名预览:</span>
-                        {generateFilename()}
+                        {generateDisplayFilename()}
                     </div>
                 </div>
                 <div className="p-4 border-t flex justify-end gap-3">
@@ -119,11 +122,12 @@ interface CloudHistoryModalProps {
 export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, onClose, appState, onRestore }) => {
     const [files, setFiles] = useState<BackupFile[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [actionLoading, setActionLoading] = useState<string | null>(null); // filename
+    const [actionLoading, setActionLoading] = useState<string | null>(null); // Use file ID (encoded key)
     const [error, setError] = useState('');
 
     const fetchFiles = async () => {
         setIsLoading(true);
+        setError('');
         const { success, data, message } = await listCloudBackups(appState.settings.supabaseUrl, appState.settings.supabaseKey);
         setIsLoading(false);
         if (success && data) {
@@ -140,11 +144,11 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
     const handleRestore = async (file: BackupFile) => {
         if (!confirm(`确定要将系统恢复到 "${file.name}" 的状态吗？当前未保存的数据将丢失。`)) return;
         
-        setActionLoading(file.name);
+        setActionLoading(file.id); // Use Encoded Key
         const { success, data, message } = await restoreFromCloud(
             appState.settings.supabaseUrl, 
             appState.settings.supabaseKey, 
-            file.name
+            file.id // Use Encoded Key
         );
         setActionLoading(null);
 
@@ -156,7 +160,6 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
                     ...sanitized.settings,
                     supabaseUrl: appState.settings.supabaseUrl,
                     supabaseKey: appState.settings.supabaseKey,
-                    // geminiKey removed from sanitization and restoration
                 };
                 onRestore({ ...sanitized, settings: mergedSettings });
                 onClose();
@@ -171,20 +174,20 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
     const handleDelete = async (file: BackupFile) => {
         if (!confirm(`确定要永久删除备份 "${file.name}" 吗？`)) return;
         
-        setActionLoading(file.name);
-        const { success, message } = await deleteCloudBackup(file.name, appState.settings.supabaseUrl, appState.settings.supabaseKey);
+        setActionLoading(file.id); // Use Encoded Key
+        const { success, message } = await deleteCloudBackup(file.id, appState.settings.supabaseUrl, appState.settings.supabaseKey);
         setActionLoading(null);
         
         if (success) {
-            setFiles(files.filter(f => f.name !== file.name));
+            setFiles(files.filter(f => f.id !== file.id));
         } else {
             alert(message);
         }
     };
 
     const handleDownload = async (file: BackupFile) => {
-        setActionLoading(file.name);
-        const url = await getDownloadUrl(file.name, appState.settings.supabaseUrl, appState.settings.supabaseKey);
+        setActionLoading(file.id);
+        const url = await getDownloadUrl(file.id, appState.settings.supabaseUrl, appState.settings.supabaseKey);
         setActionLoading(null);
         
         if (url) {
@@ -219,7 +222,7 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
                         <div className="flex flex-col items-center justify-center h-full text-rose-500 gap-2 p-8 text-center">
                             <AlertTriangle size={32}/>
                             <p>{error}</p>
-                            <p className="text-xs text-slate-400">请检查网络连接或 API Key 设置，并确认数据库已初始化</p>
+                            <p className="text-xs text-slate-400">请检查网络连接或在“系统设置”中运行初始化脚本</p>
                         </div>
                     ) : files.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
@@ -237,7 +240,7 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {files.map(file => (
-                                    <tr key={file.id || file.name} className="hover:bg-slate-50 group">
+                                    <tr key={file.id} className="hover:bg-slate-50 group">
                                         <td className="px-6 py-4">
                                             <div className="font-medium text-slate-700 break-all">{file.name}</div>
                                             {file.metadata && <div className="text-xs text-slate-400">{(file.metadata.size / 1024).toFixed(1)} KB</div>}
@@ -246,7 +249,7 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
                                             {new Date(file.created_at).toLocaleString('zh-CN')}
                                         </td>
                                         <td className="px-6 py-4 text-right whitespace-nowrap">
-                                            {actionLoading === file.name ? (
+                                            {actionLoading === file.id ? (
                                                 <span className="inline-block p-2"><Loader2 size={16} className="animate-spin text-blue-500"/></span>
                                             ) : (
                                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

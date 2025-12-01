@@ -89,12 +89,19 @@ const SettingsAndData: React.FC<Props> = ({ state, onUpdateSettings, onImportDat
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const sqlScript = `-- 1. 创建 backups 存储桶
+  // Robust SQL script that drops policies first
+  const sqlScript = `-- 1. 创建 backups 存储桶 (如果不存在)
 insert into storage.buckets (id, name, public)
 values ('backups', 'backups', true)
 on conflict (id) do nothing;
 
--- 2. 允许所有操作 (公开读写策略)
+-- 2. 清理旧策略 (确保脚本可重复运行)
+drop policy if exists "Public Access Select" on storage.objects;
+drop policy if exists "Public Access Insert" on storage.objects;
+drop policy if exists "Public Access Delete" on storage.objects;
+drop policy if exists "Public Access Update" on storage.objects;
+
+-- 3. 重新创建策略 (允许所有公开访问)
 create policy "Public Access Select" on storage.objects for select using ( bucket_id = 'backups' );
 create policy "Public Access Insert" on storage.objects for insert with check ( bucket_id = 'backups' );
 create policy "Public Access Delete" on storage.objects for delete using ( bucket_id = 'backups' );
@@ -195,16 +202,25 @@ create policy "Public Access Update" on storage.objects for update using ( bucke
         <div className="mt-8 border border-blue-100 bg-blue-50/50 rounded-lg overflow-hidden">
             <details className="group" open>
                 <summary className="p-4 bg-blue-50 cursor-pointer font-medium text-blue-700 hover:bg-blue-100 transition-colors flex justify-between items-center">
-                    <span className="flex items-center gap-2"><Database size={16}/> 数据库初始化脚本 (云端备份报错请点此)</span>
+                    <span className="flex items-center gap-2"><Database size={16}/> ⚠️ 数据库初始化脚本 (云端备份报错请必读)</span>
                     <ChevronDown size={16} className="group-open:rotate-180 transition-transform"/>
                 </summary>
                 <div className="p-4">
-                    <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-                        如果遇到 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Invalid key</span> 或 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Permission denied</span> 错误，请复制下方 SQL 代码，
-                        并在 Supabase 后台的 <strong>SQL Editor</strong> 中运行，以初始化存储桶和访问权限。
+                    <p className="text-sm text-slate-700 mb-2 font-bold">
+                        为什么会备份失败？
                     </p>
+                    <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                        Supabase 默认禁止读写操作。您必须在数据库中配置“访问策略(Policy)”才能使用云存储。
+                        <br/>如果遇到 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Invalid key</span> 或 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Policy already exists</span> 错误，请按以下步骤操作：
+                    </p>
+                    <ol className="list-decimal list-inside text-xs text-slate-600 mb-4 space-y-1">
+                        <li>复制下方 SQL 代码。</li>
+                        <li>登录 <a href="https://supabase.com/dashboard" target="_blank" className="text-blue-600 underline">Supabase Dashboard</a> -> 选择项目。</li>
+                        <li>点击左侧菜单的 <strong>SQL Editor</strong> 图标。</li>
+                        <li>点击 <strong>New Query</strong>，粘贴代码并点击 <strong>Run</strong>。</li>
+                    </ol>
                     <div className="relative">
-                        <pre className="bg-slate-800 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto border border-slate-700">
+                        <pre className="bg-slate-800 text-slate-300 p-4 rounded-lg text-xs font-mono overflow-x-auto border border-slate-700 h-40">
                             {sqlScript}
                         </pre>
                         <button 

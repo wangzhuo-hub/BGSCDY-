@@ -29,11 +29,11 @@ export const checkSupabaseConnection = async (url: string, key: string): Promise
     // Distinguish between "Network/Auth Error" and "Bucket Not Found/Empty"
     if (error) {
         // If the error implies invalid key or network issue
-        if (error.message.includes('Invalid API Key') || error.message.includes('FetchError')) {
+        if (error.message.includes('Invalid API Key') || error.message.includes('FetchError') || error.message.includes('apikey')) {
             return false;
         }
-        // If error is about bucket not found, we are technically connected to Supabase, just not set up.
-        // We return true so the UI shows "Connected" (green), but operations will prompt for SQL setup.
+        // If error is about bucket not found, we are technically connected to Supabase service, just need setup.
+        // We return true so UI shows "Connected", user can then run SQL script.
     }
     return true;
   } catch {
@@ -41,31 +41,76 @@ export const checkSupabaseConnection = async (url: string, key: string): Promise
   }
 };
 
-// Helper to safely encode filenames for S3/Supabase
-const safeEncode = (name: string) => encodeURIComponent(name);
-const safeDecode = (name: string) => decodeURIComponent(name);
+// --- Filename Encoding Helpers (Hex Strategy) ---
+// Using Hex encoding avoids all issues with URL encoding/decoding of CJK characters on S3-compatible storages.
+
+const toHex = (str: string): string => {
+  try {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    console.error("Hex encoding failed", e);
+    return str.replace(/[^a-zA-Z0-9]/g, '_'); // Fallback
+  }
+};
+
+const fromHex = (hex: string): string => {
+  try {
+    // If not valid hex (odd length or non-hex chars), return as is
+    if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) return hex;
+    
+    const bytes = new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const decoder = new TextDecoder();
+    return decoder.decode(bytes);
+  } catch (e) {
+    return hex; // Fallback to original string if decode fails
+  }
+};
+
+// Encodes "Name.json" -> "HexOfName.json"
+const encodeFilename = (filename: string): string => {
+    const parts = filename.split('.');
+    const ext = parts.length > 1 ? parts.pop() : '';
+    const name = parts.join('.');
+    const encodedName = toHex(name);
+    return ext ? `${encodedName}.${ext}` : encodedName;
+};
+
+// Decodes "HexOfName.json" -> "Name.json"
+const decodeFilename = (encodedFilename: string): string => {
+    const parts = encodedFilename.split('.');
+    const ext = parts.length > 1 ? parts.pop() : '';
+    const name = parts.join('.');
+    const decodedName = fromHex(name);
+    // If decode resulted in same string (fallback), implies it wasn't hex, return original
+    return ext ? `${decodedName}.${ext}` : decodedName;
+};
+
 
 export const backupToCloud = async (state: AppState, url: string, key: string, customFilename?: string): Promise<{ success: boolean; message: string }> => {
   const client = getSupabase(url, key);
   if (!client) return { success: false, message: '请先配置 Supabase 连接信息' };
 
   try {
+    // 1. Generate Logical Filename (Human Readable)
     const rawFileName = customFilename || `backup_${new Date().toISOString().split('T')[0]}.json`;
-    // Encode filename to handle Chinese characters and special symbols safely
-    const encodedFileName = safeEncode(rawFileName);
+    
+    // 2. Encode to Safe Key for Storage (Hex)
+    const safeStorageKey = encodeFilename(rawFileName);
     
     const fileBody = JSON.stringify(state);
     
     const { error: uploadError } = await client.storage
       .from('backups')
-      .upload(encodedFileName, fileBody, {
+      .upload(safeStorageKey, fileBody, {
         contentType: 'application/json',
-        upsert: true,
+        upsert: false, // Snapshot mode: do not overwrite
       });
 
     if (uploadError) {
-        if (uploadError.message.includes('Row-level security policy') || uploadError.message.includes('The resource was not found')) {
-            throw new Error('权限不足或存储桶不存在。请在“系统设置”中运行数据库初始化脚本。');
+        if (uploadError.message.includes('Row-level security') || uploadError.message.includes('not found')) {
+            throw new Error('权限不足或存储桶未创建。请在“系统设置”中运行初始化脚本。');
         }
         throw uploadError;
     }
@@ -90,7 +135,8 @@ export const listCloudBackups = async (url: string, key: string): Promise<{ succ
     // Decode filenames for display
     const decodedData = data.map((f: any) => ({
         ...f,
-        name: safeDecode(f.name)
+        name: decodeFilename(f.name), // Display name
+        id: f.name // Store original key (encoded) as ID for operations
     }));
     
     return { success: true, data: decodedData as BackupFile[] };
@@ -99,13 +145,13 @@ export const listCloudBackups = async (url: string, key: string): Promise<{ succ
   }
 };
 
-export const deleteCloudBackup = async (filename: string, url: string, key: string): Promise<{ success: boolean; message: string }> => {
+export const deleteCloudBackup = async (fileKey: string, url: string, key: string): Promise<{ success: boolean; message: string }> => {
     const client = getSupabase(url, key);
     if (!client) return { success: false, message: '未连接' };
 
     try {
-        const encodedName = safeEncode(filename);
-        const { error } = await client.storage.from('backups').remove([encodedName]);
+        // fileKey is already the encoded name from the ID field in listCloudBackups
+        const { error } = await client.storage.from('backups').remove([fileKey]);
         if (error) throw error;
         return { success: true, message: '删除成功' };
     } catch (error: any) {
@@ -113,29 +159,27 @@ export const deleteCloudBackup = async (filename: string, url: string, key: stri
     }
 }
 
-export const restoreFromCloud = async (url: string, key: string, filename?: string): Promise<{ success: boolean; data?: AppState; message: string }> => {
+export const restoreFromCloud = async (url: string, key: string, fileKey?: string): Promise<{ success: boolean; data?: AppState; message: string }> => {
   const client = getSupabase(url, key);
   if (!client) return { success: false, message: '请先配置 Supabase 连接信息' };
 
   try {
-    let targetFile = filename;
+    let targetKey = fileKey;
 
-    // If no filename, get latest
-    if (!targetFile) {
+    // If no specific file key provided, find the latest
+    if (!targetKey) {
         const { data: list, error: listError } = await client.storage
         .from('backups')
         .list('', { limit: 1, sortBy: { column: 'created_at', order: 'desc' } });
 
         if (listError) throw listError;
         if (!list || list.length === 0) return { success: false, message: '云端无备份文件' };
-        targetFile = safeDecode(list[0].name); // Decode for logic usage
+        targetKey = list[0].name; 
     }
-
-    const encodedTarget = safeEncode(targetFile);
 
     const { data: fileData, error: downloadError } = await client.storage
       .from('backups')
-      .download(encodedTarget);
+      .download(targetKey!);
 
     if (downloadError) throw downloadError;
     if (!fileData) return { success: false, message: '下载文件为空' };
@@ -150,11 +194,11 @@ export const restoreFromCloud = async (url: string, key: string, filename?: stri
   }
 };
 
-export const getDownloadUrl = async (filename: string, url: string, key: string): Promise<string | null> => {
+export const getDownloadUrl = async (fileKey: string, url: string, key: string): Promise<string | null> => {
     const client = getSupabase(url, key);
     if (!client) return null;
-    const encodedName = safeEncode(filename);
-    const { data } = client.storage.from('backups').createSignedUrl(encodedName, 60);
+    
+    const { data } = client.storage.from('backups').createSignedUrl(fileKey, 60);
     return data?.signedUrl || null;
 };
 
