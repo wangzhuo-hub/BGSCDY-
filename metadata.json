@@ -1,0 +1,5 @@
+{
+  "name": "办公租赁市场调研专业版（云端V1.0）",
+  "description": "专业的办公租赁市场调研统计程序，集成 Google Gemini AI 与 Supabase 云同步功能。",
+  "requestFramePermissions": []
+}
