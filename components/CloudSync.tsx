@@ -187,11 +187,16 @@ export const CloudHistoryModal: React.FC<CloudHistoryModalProps> = ({ isOpen, on
 
     const handleDownload = async (file: BackupFile) => {
         setActionLoading(file.id);
-        const url = await getDownloadUrl(file.id, appState.settings.supabaseUrl, appState.settings.supabaseKey);
+        const url = await getDownloadUrl(file.id, appState.settings.supabaseUrl, appState.settings.supabaseKey, file.name);
         setActionLoading(null);
         
         if (url) {
-            window.open(url, '_blank');
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', file.name);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         } else {
             alert('获取下载链接失败');
         }

@@ -50,7 +50,11 @@ const Layout: React.FC<LayoutProps> = ({
           ))}
         </nav>
         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 text-center">
-          © 2024 MarketSurvey Pro
+            <div className="flex items-center justify-center gap-1 mb-1 text-emerald-500/80">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                本地自动保存
+            </div>
+            © 2024 MarketSurvey Pro
         </div>
       </aside>
 

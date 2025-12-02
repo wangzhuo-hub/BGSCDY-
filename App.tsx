@@ -38,6 +38,14 @@ const App: React.FC = () => {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        
+        // Auto-migration: Check if using old Supabase URL (from previous session) and force update to new one
+        if (parsed.settings?.supabaseUrl?.includes('zqinghqgkhxutsslulzn')) {
+            console.log("Migrating old Supabase configuration to new default...");
+            parsed.settings.supabaseUrl = defaultSettings.supabaseUrl;
+            parsed.settings.supabaseKey = defaultSettings.supabaseKey;
+        }
+
         // Ensure structure consistency
         setState({
           parks: parsed.parks || [],

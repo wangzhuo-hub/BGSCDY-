@@ -194,11 +194,22 @@ export const restoreFromCloud = async (url: string, key: string, fileKey?: strin
   }
 };
 
-export const getDownloadUrl = async (fileKey: string, url: string, key: string): Promise<string | null> => {
+export const getDownloadUrl = async (fileKey: string, url: string, key: string, downloadFilename?: string): Promise<string | null> => {
     const client = getSupabase(url, key);
     if (!client) return null;
     
-    const { data } = client.storage.from('backups').createSignedUrl(fileKey, 60);
+    // IMPORTANT: Await the promise!
+    // We pass 'download' option to force Content-Disposition header with the decoded Chinese filename
+    const { data, error } = await client.storage
+        .from('backups')
+        .createSignedUrl(fileKey, 60, {
+            download: downloadFilename || true
+        });
+
+    if (error) {
+        console.error("Download URL Error:", error);
+        return null;
+    }
     return data?.signedUrl || null;
 };
 

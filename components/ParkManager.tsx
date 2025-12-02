@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, ChevronRight, X, Search, Save, Calendar, Loader2, TrendingUp, Building as BuildingIcon, DollarSign, PieChart, Maximize2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Plus, Trash2, Edit2, ChevronRight, X, Search, Save, Calendar, Loader2, TrendingUp, TrendingDown, Minus, Building as BuildingIcon, DollarSign, PieChart, Maximize2, Clock, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Park, SurveyRecord, Building, AIEvent, AppSettings } from '../types';
 import { generateId, formatDate, formatMoney } from '../utils';
@@ -23,6 +23,35 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
     .filter(r => r.parkId === selectedParkId)
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+  // --- Statistics Logic ---
+  const stats = useMemo(() => {
+    const now = new Date();
+    const oneDay = 24 * 60 * 60 * 1000;
+    
+    const countInPeriod = (daysStart: number, daysEnd: number) => {
+      const startDate = new Date(now.getTime() - daysStart * oneDay);
+      const endDate = new Date(now.getTime() - daysEnd * oneDay); // daysEnd is smaller (closer to now)
+      return records.filter(r => {
+        const d = new Date(r.date);
+        return d >= startDate && d <= endDate;
+      }).length;
+    };
+
+    const calcMetric = (days: number) => {
+      const current = countInPeriod(days, 0);
+      const previous = countInPeriod(days * 2, days);
+      const diff = current - previous;
+      const percent = previous === 0 ? (current > 0 ? 100 : 0) : (diff / previous) * 100;
+      return { current, diff, percent };
+    };
+
+    return {
+      week: calcMetric(7),
+      month: calcMetric(30),
+      quarter: calcMetric(90)
+    };
+  }, [records]);
+
   // --- Handlers ---
   const handleSavePark = (park: Park) => {
     if (parks.find(p => p.id === park.id)) {
@@ -41,57 +70,109 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
     }
   };
 
+  const renderStatCard = (title: string, data: { current: number, diff: number, percent: number }) => {
+      const isUp = data.diff > 0;
+      const isFlat = data.diff === 0;
+      
+      return (
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-1">
+              <div className="text-xs text-slate-500 font-medium mb-1">{title}</div>
+              <div className="flex items-end justify-between">
+                  <div className="text-2xl font-bold text-slate-800">{data.current} <span className="text-xs font-normal text-slate-400">次</span></div>
+                  <div className={`flex items-center text-xs font-medium ${isUp ? 'text-red-500' : isFlat ? 'text-slate-400' : 'text-emerald-500'}`}>
+                      {isUp ? <TrendingUp size={14} className="mr-1"/> : isFlat ? <Minus size={14} className="mr-1"/> : <TrendingDown size={14} className="mr-1"/>}
+                      {isUp ? '+' : ''}{data.diff} ({Math.abs(data.percent).toFixed(0)}%)
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
   return (
-    <div className="h-full flex flex-col md:flex-row gap-6 max-w-7xl mx-auto">
-      {/* Left List - Split by Type */}
-      <div className={`w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col ${selectedParkId ? 'hidden md:flex' : 'flex'}`}>
-        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
-          <h3 className="font-bold text-slate-700">园区列表</h3>
-          <button 
-            onClick={() => { setSelectedParkId(null); setIsEditModalOpen(true); }}
-            className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-4">
-            {/* My Projects */}
-             <div>
-                <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-2">本案项目</h4>
-                {parks.filter(p => p.isMyProject).map(park => (
-                     <ParkCard key={park.id} park={park} isActive={selectedParkId === park.id} onClick={() => setSelectedParkId(park.id)} />
-                ))}
-                {parks.filter(p => p.isMyProject).length === 0 && <p className="px-4 text-xs text-slate-400">暂无本案项目</p>}
-             </div>
-            {/* Competitors */}
-             <div>
-                <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">竞品园区</h4>
-                {parks.filter(p => !p.isMyProject).map(park => (
-                     <ParkCard key={park.id} park={park} isActive={selectedParkId === park.id} onClick={() => setSelectedParkId(park.id)} />
-                ))}
-             </div>
-        </div>
+    <div className="h-full flex flex-col gap-6 max-w-7xl mx-auto">
+      
+      {/* Top Stats Dashboard */}
+      <div className="grid grid-cols-3 gap-4">
+          {renderStatCard('近1周调研', stats.week)}
+          {renderStatCard('近1个月调研', stats.month)}
+          {renderStatCard('近3个月调研', stats.quarter)}
       </div>
 
-      {/* Right Detail */}
-      <div className={`w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex-col overflow-hidden ${selectedParkId ? 'flex' : 'hidden md:flex'}`}>
-        {selectedPark ? (
-            <ParkDetail 
-                park={selectedPark} 
-                records={parkRecords}
-                allRecords={records}
-                settings={settings}
-                onEdit={() => setIsEditModalOpen(true)}
-                onDelete={() => handleDeletePark(selectedPark.id)}
-                onBack={() => setSelectedParkId(null)}
-                onUpdateRecords={setRecords}
-            />
-        ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
-                <BuildingIcon size={64} className="mb-4 text-slate-200" />
-                <p>选择左侧园区查看详细调研档案</p>
+      <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0">
+        {/* Left List - Split by Type */}
+        <div className={`w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col ${selectedParkId ? 'hidden md:flex' : 'flex'}`}>
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl shrink-0">
+            <h3 className="font-bold text-slate-700">园区列表</h3>
+            <button 
+                onClick={() => { setSelectedParkId(null); setIsEditModalOpen(true); }}
+                className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+            >
+                <Plus size={18} />
+            </button>
             </div>
-        )}
+            <div className="flex-1 overflow-y-auto p-2 space-y-4">
+                {/* My Projects */}
+                <div>
+                    <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-2">本案项目</h4>
+                    {parks.filter(p => p.isMyProject).map(park => {
+                         const parkRecs = records.filter(r => r.parkId === park.id);
+                         const lastRec = parkRecs.length > 0 
+                            ? parkRecs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+                            : null;
+                         return (
+                            <ParkCard 
+                                key={park.id} 
+                                park={park} 
+                                isActive={selectedParkId === park.id} 
+                                onClick={() => setSelectedParkId(park.id)} 
+                                lastUpdate={lastRec?.date}
+                            />
+                         );
+                    })}
+                    {parks.filter(p => p.isMyProject).length === 0 && <p className="px-4 text-xs text-slate-400">暂无本案项目</p>}
+                </div>
+                {/* Competitors */}
+                <div>
+                    <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">竞品园区</h4>
+                    {parks.filter(p => !p.isMyProject).map(park => {
+                         const parkRecs = records.filter(r => r.parkId === park.id);
+                         const lastRec = parkRecs.length > 0 
+                            ? parkRecs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+                            : null;
+                         return (
+                            <ParkCard 
+                                key={park.id} 
+                                park={park} 
+                                isActive={selectedParkId === park.id} 
+                                onClick={() => setSelectedParkId(park.id)} 
+                                lastUpdate={lastRec?.date}
+                            />
+                         );
+                    })}
+                </div>
+            </div>
+        </div>
+
+        {/* Right Detail */}
+        <div className={`w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-slate-200 flex-col overflow-hidden ${selectedParkId ? 'flex' : 'hidden md:flex'}`}>
+            {selectedPark ? (
+                <ParkDetail 
+                    park={selectedPark} 
+                    records={parkRecords}
+                    allRecords={records}
+                    settings={settings}
+                    onEdit={() => setIsEditModalOpen(true)}
+                    onDelete={() => handleDeletePark(selectedPark.id)}
+                    onBack={() => setSelectedParkId(null)}
+                    onUpdateRecords={setRecords}
+                />
+            ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+                    <BuildingIcon size={64} className="mb-4 text-slate-200" />
+                    <p>选择左侧园区查看详细调研档案</p>
+                </div>
+            )}
+        </div>
       </div>
 
       {isEditModalOpen && (
@@ -107,48 +188,77 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
 
 // --- Sub-Components ---
 
-const ParkCard: React.FC<{ park: Park, isActive: boolean, onClick: () => void }> = ({ park, isActive, onClick }) => (
-    <div 
-        onClick={onClick}
-        className={`p-4 rounded-lg cursor-pointer border transition-all ${
-            isActive 
-            ? 'bg-blue-50 border-blue-200 shadow-inner' 
-            : 'bg-white border-slate-100 hover:border-blue-200 hover:shadow-sm'
-        }`}
-    >
-        <div className="flex justify-between items-start">
-            <div>
-                <h4 className={`font-semibold ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>{park.name}</h4>
-                <p className="text-xs text-slate-500 mt-1">{park.address || '地址未填'}</p>
+const ParkCard: React.FC<{ park: Park, isActive: boolean, onClick: () => void, lastUpdate?: string }> = ({ park, isActive, onClick, lastUpdate }) => {
+    // Check if stale (older than 30 days)
+    const isStale = useMemo(() => {
+        if (!lastUpdate) return false;
+        const diffTime = Math.abs(new Date().getTime() - new Date(lastUpdate).getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays > 30;
+    }, [lastUpdate]);
+
+    return (
+        <div 
+            onClick={onClick}
+            className={`p-4 rounded-lg cursor-pointer border transition-all relative ${
+                isActive 
+                ? 'bg-blue-50 border-blue-200 shadow-inner' 
+                : 'bg-white border-slate-100 hover:border-blue-200 hover:shadow-sm'
+            }`}
+        >
+            <div className="flex justify-between items-start">
+                <div>
+                    <h4 className={`font-semibold ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>{park.name}</h4>
+                    <p className="text-xs text-slate-500 mt-1">{park.address || '地址未填'}</p>
+                </div>
+                {park.isMyProject && <span className="bg-blue-100 text-blue-600 text-[10px] px-1.5 py-0.5 rounded font-bold">本案</span>}
             </div>
-            {park.isMyProject && <span className="bg-blue-100 text-blue-600 text-[10px] px-1.5 py-0.5 rounded font-bold">本案</span>}
-        </div>
-        
-        {/* Key Metrics in Card */}
-        <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-dashed border-slate-100">
-            <div className="text-center">
-                <div className="text-[10px] text-slate-400">租金</div>
-                <div className="text-xs font-medium text-slate-700">{park.guidancePrice ? `¥${park.guidancePrice}` : '-'}</div>
-            </div>
-             <div className="text-center">
-                <div className="text-[10px] text-slate-400">面积</div>
-                <div className="text-xs font-medium text-slate-700">{park.totalGrossArea ? Math.round(park.totalGrossArea/10000)+'万㎡' : '-'}</div>
-            </div>
-             <div className="text-center">
-                <div className="text-[10px] text-slate-400">出租率</div>
-                <div className={`text-xs font-medium ${park.baselineOccupancy && park.baselineOccupancy > 85 ? 'text-emerald-600' : 'text-slate-700'}`}>
-                    {park.baselineOccupancy ? park.baselineOccupancy+'%' : '-'}
+            
+            {/* Key Metrics in Card */}
+            <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-dashed border-slate-100">
+                <div className="text-center">
+                    <div className="text-[10px] text-slate-400">租金</div>
+                    <div className="text-xs font-medium text-slate-700">{park.guidancePrice ? `¥${park.guidancePrice}` : '-'}</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-[10px] text-slate-400">面积</div>
+                    <div className="text-xs font-medium text-slate-700">{park.totalGrossArea ? Math.round(park.totalGrossArea/10000)+'万㎡' : '-'}</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-[10px] text-slate-400">出租率</div>
+                    <div className={`text-xs font-medium ${park.baselineOccupancy && park.baselineOccupancy > 85 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                        {park.baselineOccupancy ? park.baselineOccupancy+'%' : '-'}
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div className="mt-2 flex gap-1 overflow-hidden">
-            {park.tags.slice(0,2).map((t, i) => (
-                <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate">{t}</span>
-            ))}
+            <div className="mt-2 flex gap-1 overflow-hidden">
+                {park.tags.slice(0,2).map((t, i) => (
+                    <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate">{t}</span>
+                ))}
+            </div>
+
+            {/* Update Status */}
+            <div className="mt-3 pt-2 border-t border-slate-50 flex items-center justify-between text-[10px]">
+                {lastUpdate ? (
+                    isStale ? (
+                        <span className="flex items-center gap-1 text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded">
+                            <AlertTriangle size={10} /> 30+天未更新
+                        </span>
+                    ) : (
+                        <span className="flex items-center gap-1 text-slate-400">
+                            <Clock size={10} /> {formatDate(lastUpdate)}
+                        </span>
+                    )
+                ) : (
+                    <span className="flex items-center gap-1 text-slate-300">
+                        <Clock size={10} /> 暂无调研
+                    </span>
+                )}
+            </div>
         </div>
-    </div>
-);
+    );
+};
 
 const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onBack, onUpdateRecords }: any) => {
     const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
