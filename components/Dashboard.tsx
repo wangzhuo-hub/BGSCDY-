@@ -1,6 +1,9 @@
 import React, { useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, TrendingDown, Minus, Building, AlertCircle } from 'lucide-react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+  ComposedChart, Line, Area
+} from 'recharts';
+import { TrendingUp, TrendingDown, Minus, AlertCircle, Calendar } from 'lucide-react';
 import { Park, SurveyRecord } from '../types';
 import { formatMoney } from '../utils';
 
@@ -14,56 +17,108 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
   const myPark = parks.find(p => p.isMyProject);
   const competitors = parks.filter(p => !p.isMyProject);
 
-  const getLatestRecord = (parkId: string) => {
-    return records
-      .filter(r => r.parkId === parkId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-  };
-
-  const myRecord = myPark ? getLatestRecord(myPark.id) : null;
-
-  const compStats = useMemo(() => {
-    if (competitors.length === 0) return { avgPrice: 0, avgOccupancy: 0, totalVacant: 0 };
-    
+  // Helper: Get statistics for all competitors at a specific point in time
+  const getMarketStatsAtDate = (targetDate: Date) => {
     let totalPrice = 0;
     let totalOccupancy = 0;
     let count = 0;
-    let totalVacant = 0;
+    let totalVacantArea = 0;
 
     competitors.forEach(comp => {
-      const rec = getLatestRecord(comp.id);
+      // Find the latest record on or before targetDate
+      const rec = records
+        .filter(r => r.parkId === comp.id && new Date(r.date) <= targetDate)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+
       if (rec) {
         totalPrice += rec.price;
         totalOccupancy += rec.occupancyRate;
         count++;
+
+        // Calculate Vacancy: Prioritize (TotalGrossArea * (1 - Rate)), fallback to static building vacancy
+        if (comp.totalGrossArea && comp.totalGrossArea > 0) {
+            totalVacantArea += comp.totalGrossArea * (1 - rec.occupancyRate / 100);
+        } else {
+            // Fallback to static sum if GFA is missing
+            totalVacantArea += comp.buildings.reduce((sum, b) => sum + b.vacantArea, 0);
+        }
       }
-      const parkVacant = comp.buildings.reduce((sum, b) => sum + b.vacantArea, 0);
-      totalVacant += parkVacant;
     });
 
     return {
       avgPrice: count ? totalPrice / count : 0,
       avgOccupancy: count ? totalOccupancy / count : 0,
-      totalVacant
+      totalVacant: totalVacantArea,
+      validSample: count
     };
-  }, [competitors, records]);
+  };
+
+  // 1. Current Stats (Now)
+  const currentStats = useMemo(() => getMarketStatsAtDate(new Date()), [parks, records]);
+  
+  // 2. Historical Stats for Comparison
+  const historyStats = useMemo(() => {
+    const now = new Date();
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    const lastQuarterDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+
+    return {
+        lastMonth: getMarketStatsAtDate(lastMonthDate),
+        lastQuarter: getMarketStatsAtDate(lastQuarterDate)
+    };
+  }, [parks, records]);
+
+  // 3. Trend Data (Last 6 Months)
+  const trendData = useMemo(() => {
+      const data = [];
+      const now = new Date();
+      // Generate last 6 months
+      for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          // Set to end of that month to capture full month's data state
+          const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+          
+          const stats = getMarketStatsAtDate(endOfMonth);
+          data.push({
+              name: `${d.getMonth() + 1}月`,
+              fullDate: d.toISOString(),
+              price: Number(stats.avgPrice.toFixed(1)),
+              occupancy: Number(stats.avgOccupancy.toFixed(1)),
+              vacancy: Math.round(stats.totalVacant)
+          });
+      }
+      return data;
+  }, [parks, records]);
+
+
+  // My Project Latest Record
+  const myRecord = useMemo(() => {
+      if (!myPark) return null;
+      return records
+        .filter(r => r.parkId === myPark.id)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+  }, [myPark, records]);
 
   const myStats = useMemo(() => {
     if (!myPark) return { vacant: 0 };
+    // Try to calc from GFA first for consistency
+    if (myPark.totalGrossArea && myRecord) {
+        return { vacant: myPark.totalGrossArea * (1 - myRecord.occupancyRate / 100) };
+    }
     return {
       vacant: myPark.buildings.reduce((sum, b) => sum + b.vacantArea, 0)
     };
-  }, [myPark]);
+  }, [myPark, myRecord]);
 
-  // --- Charts Data ---
+  // --- Charts Data (Comparison) ---
   const priceData = [
     { name: '本案项目', value: myRecord?.price || 0, type: 'mine' },
-    { name: '竞品平均', value: compStats.avgPrice, type: 'comp' }
+    { name: '竞品平均', value: currentStats.avgPrice, type: 'comp' }
   ];
 
   const occupancyData = [
     { name: '本案项目', value: myRecord?.occupancyRate || 0, type: 'mine' },
-    { name: '竞品平均', value: compStats.avgOccupancy, type: 'comp' }
+    { name: '竞品平均', value: currentStats.avgOccupancy, type: 'comp' }
   ];
 
   // --- Policy Trends ---
@@ -76,18 +131,40 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
   }, [parks]);
 
   // --- Render Helpers ---
-  const renderDiff = (mine: number, comp: number, isPercent = false) => {
+  const renderDiff = (mine: number, comp: number, isPercent = false, inverseColor = false) => {
     const diff = mine - comp;
-    if (diff === 0) return <span className="text-slate-500 flex items-center text-sm"><Minus size={14} /> 持平</span>;
+    if (Math.abs(diff) < 0.01) return <span className="text-slate-400 flex items-center text-xs ml-auto"><Minus size={12} /> 持平</span>;
     const isPositive = diff > 0;
     const Icon = isPositive ? TrendingUp : TrendingDown;
-    const color = isPositive ? 'text-emerald-600' : 'text-rose-600';
+    
+    // Default: Green is Good (High Price, High Occ). Red is Bad.
+    // Inverse: High Vacancy is Bad (Red), Low Vacancy is Good (Green).
+    let colorClass = isPositive ? 'text-emerald-600' : 'text-rose-600';
+    if (inverseColor) {
+        colorClass = isPositive ? 'text-rose-600' : 'text-emerald-600';
+    }
+
     return (
-      <span className={`${color} flex items-center gap-1 text-sm font-medium`}>
-        <Icon size={14} />
+      <span className={`${colorClass} flex items-center gap-1 text-xs font-medium ml-auto`}>
+        <Icon size={12} />
         {isPositive ? '+' : ''}{isPercent ? diff.toFixed(1) + '%' : diff.toFixed(1)}
       </span>
     );
+  };
+
+  const renderTrendChange = (current: number, prev: number, label: string) => {
+      const diff = current - prev;
+      const isUp = diff > 0;
+      const color = isUp ? 'text-rose-500' : diff < 0 ? 'text-emerald-500' : 'text-slate-400';
+      return (
+          <div className="flex items-center justify-between text-xs mt-1">
+              <span className="text-slate-500">{label}</span>
+              <span className={`flex items-center ${color}`}>
+                  {diff !== 0 ? (isUp ? <TrendingUp size={10} className="mr-0.5"/> : <TrendingDown size={10} className="mr-0.5"/>) : <Minus size={10} className="mr-0.5"/>}
+                  {Math.abs(Math.round(diff)).toLocaleString()} ㎡
+              </span>
+          </div>
+      )
   };
 
   if (!myPark) {
@@ -100,7 +177,7 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       <header>
         <h2 className="text-2xl font-bold text-slate-800">市场概览 Dashboard</h2>
         <p className="text-slate-500 text-sm">数据截止: {new Date().toLocaleDateString('zh-CN')}</p>
@@ -121,12 +198,12 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
             <div className="h-12 w-px bg-slate-200 mx-4"></div>
             <div className="text-right">
               <p className="text-xs text-slate-500 mb-1">竞品平均</p>
-              <div className="text-2xl font-semibold text-slate-600">{formatMoney(compStats.avgPrice)}</div>
+              <div className="text-2xl font-semibold text-slate-600">{formatMoney(currentStats.avgPrice)}</div>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
              <span className="text-xs text-slate-400">对比差距</span>
-             {renderDiff(myRecord?.price || 0, compStats.avgPrice)}
+             {renderDiff(myRecord?.price || 0, currentStats.avgPrice)}
           </div>
         </div>
 
@@ -141,41 +218,90 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
             <div className="h-12 w-px bg-slate-200 mx-4"></div>
             <div className="text-right">
               <p className="text-xs text-slate-500 mb-1">竞品平均</p>
-              <div className="text-2xl font-semibold text-slate-600">{compStats.avgOccupancy.toFixed(1)}%</div>
+              <div className="text-2xl font-semibold text-slate-600">{currentStats.avgOccupancy.toFixed(1)}%</div>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
              <span className="text-xs text-slate-400">对比差距</span>
-             {renderDiff(myRecord?.occupancyRate || 0, compStats.avgOccupancy, true)}
+             {renderDiff(myRecord?.occupancyRate || 0, currentStats.avgOccupancy, true)}
           </div>
         </div>
 
-        {/* Vacancy Card */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <h3 className="text-slate-500 text-sm font-medium mb-4">空置面积 (㎡)</h3>
-           <div className="flex justify-between items-end">
+        {/* Vacancy Card (Enhanced) */}
+         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden">
+          <h3 className="text-slate-500 text-sm font-medium mb-4 flex justify-between">
+              空置库存 (㎡)
+              <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full">动态计算</span>
+          </h3>
+           <div className="flex justify-between items-end mb-4">
             <div>
-              <p className="text-xs text-blue-600 font-bold mb-1">本案</p>
-              <div className="text-3xl font-bold text-slate-900">{myStats.vacant.toLocaleString()}</div>
+              <p className="text-xs text-blue-600 font-bold mb-1">本案空置</p>
+              <div className="text-2xl font-bold text-slate-900">{Math.round(myStats.vacant).toLocaleString()}</div>
             </div>
-            <div className="h-12 w-px bg-slate-200 mx-4"></div>
+            <div className="h-10 w-px bg-slate-200 mx-4"></div>
             <div className="text-right">
-              <p className="text-xs text-slate-500 mb-1">竞品总存量</p>
-              <div className="text-2xl font-semibold text-slate-600">{compStats.totalVacant.toLocaleString()}</div>
+              <p className="text-xs text-slate-500 mb-1">竞品总空置</p>
+              <div className="text-2xl font-semibold text-slate-600">{Math.round(currentStats.totalVacant).toLocaleString()}</div>
             </div>
           </div>
-           <div className="mt-4 pt-4 border-t border-slate-100">
-             <div className="text-xs text-slate-500">
-                市场风向标：
-                {topPolicies.map(([tag], i) => (
-                    <span key={i} className="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded mr-2 mt-1">{tag}</span>
-                ))}
-             </div>
+           <div className="pt-3 border-t border-slate-100 space-y-1">
+             {renderTrendChange(currentStats.totalVacant, historyStats.lastMonth.totalVacant, '较上月')}
+             {renderTrendChange(currentStats.totalVacant, historyStats.lastQuarter.totalVacant, '较上季')}
           </div>
         </div>
       </div>
 
-      {/* Charts Section */}
+      {/* Market Trend Chart */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Calendar size={20} className="text-blue-500"/> 市场核心指标走势 (Market Trends)
+            </h3>
+            <div className="flex gap-4 text-xs">
+                <div className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-500 rounded-sm"></span> 平均租金</div>
+                <div className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm"></span> 平均出租率</div>
+            </div>
+          </div>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={trendData} margin={{top: 10, right: 30, left: 0, bottom: 0}}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}}/>
+                    
+                    {/* Y Axis 1: Price */}
+                    <YAxis yAxisId="left" orientation="left" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} 
+                        label={{ value: '租金', angle: -90, position: 'insideLeft', style: {textAnchor: 'middle', fill: '#94a3b8', fontSize: 10} }}
+                    />
+                    
+                    {/* Y Axis 2: Occupancy */}
+                    <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} unit="%" domain={[0, 100]}
+                        label={{ value: '出租率', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: '#94a3b8', fontSize: 10} }}
+                    />
+                    
+                    <Tooltip 
+                        contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                        formatter={(value: number, name: string) => {
+                            if (name === '平均租金') return [`¥${value}`, name];
+                            if (name === '平均出租率') return [`${value}%`, name];
+                            return [value, name];
+                        }}
+                    />
+                    
+                    <Area yAxisId="left" type="monotone" dataKey="price" name="平均租金" fill="url(#colorPrice)" stroke="#3b82f6" strokeWidth={2}/>
+                    <Line yAxisId="right" type="monotone" dataKey="occupancy" name="平均出租率" stroke="#10b981" strokeWidth={2} dot={{r: 4, strokeWidth: 2}} activeDot={{r: 6}}/>
+                    
+                    <defs>
+                        <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        </linearGradient>
+                    </defs>
+                </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+      </div>
+
+      {/* Comparisons Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <h3 className="text-lg font-bold text-slate-800 mb-6">租金水平对比</h3>
@@ -195,9 +321,9 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
             </ResponsiveContainer>
           </div>
           <p className="text-center text-sm text-slate-500 mt-2">
-            本案单价{myRecord?.price && myRecord.price > compStats.avgPrice ? '高于' : '低于'}市场平均 
+            本案单价{myRecord?.price && myRecord.price > currentStats.avgPrice ? '高于' : '低于'}市场平均 
             <span className="font-bold text-slate-800 ml-1">
-                {formatMoney(Math.abs((myRecord?.price || 0) - compStats.avgPrice))}
+                {formatMoney(Math.abs((myRecord?.price || 0) - currentStats.avgPrice))}
             </span>
           </p>
         </div>
@@ -226,6 +352,12 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
             <h3 className="font-bold text-slate-800">市场监测总表</h3>
+            <div className="text-xs text-slate-400">
+                市场热点：
+                {topPolicies.map(([tag], i) => (
+                    <span key={i} className="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded ml-2">{tag}</span>
+                ))}
+             </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -234,15 +366,25 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
                 <th className="px-6 py-3 font-medium">园区名称</th>
                 <th className="px-6 py-3 font-medium">最新租金</th>
                 <th className="px-6 py-3 font-medium">出租率</th>
-                <th className="px-6 py-3 font-medium">空置(㎡)</th>
+                <th className="px-6 py-3 font-medium">空置库存 (㎡)</th>
                 <th className="px-6 py-3 font-medium">佣金政策</th>
                 <th className="px-6 py-3 font-medium">趋势</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {[myPark, ...competitors].filter(Boolean).map((park) => {
-                  const rec = getLatestRecord(park!.id);
-                  const vacant = park!.buildings.reduce((s, b) => s + b.vacantArea, 0);
+                  // Logic here is consistent with the getMarketStatsAtDate function
+                  const rec = records
+                    .filter(r => r.parkId === park!.id)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                  
+                  let vacant = 0;
+                  if (park!.totalGrossArea && park!.totalGrossArea > 0 && rec) {
+                      vacant = park!.totalGrossArea * (1 - rec.occupancyRate / 100);
+                  } else {
+                      vacant = park!.buildings.reduce((s, b) => s + b.vacantArea, 0);
+                  }
+
                   const isMine = park!.isMyProject;
                   return (
                     <tr key={park!.id} className={`hover:bg-slate-50 ${isMine ? 'bg-blue-50/30' : ''}`}>
@@ -252,7 +394,7 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
                         </td>
                         <td className="px-6 py-4 text-slate-600">{rec ? formatMoney(rec.price) : '-'}</td>
                         <td className="px-6 py-4 text-slate-600">{rec ? rec.occupancyRate.toFixed(1)+'%' : '-'}</td>
-                        <td className="px-6 py-4 text-slate-600">{vacant}</td>
+                        <td className="px-6 py-4 text-slate-600">{Math.round(vacant).toLocaleString()}</td>
                         <td className="px-6 py-4 text-slate-500 text-xs">
                             {park!.tags.slice(0, 2).join(', ')}
                         </td>
