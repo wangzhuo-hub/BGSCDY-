@@ -3,6 +3,8 @@ export interface Building {
   name: string;
   totalArea: number;
   vacantArea: number;
+  guidancePrice?: number;   // 单栋指导租金
+  targetOccupancy?: number; // 单栋预计出租率
 }
 
 export interface SurveyRecord {
@@ -17,12 +19,14 @@ export interface SurveyRecord {
   deliveryStandard: string;
   trend: 'up' | 'down' | 'flat';
   remarks: string;
+  images?: string[]; // 新增：图片URL列表
 }
 
 export interface Park {
   id: string;
   name: string;
   isMyProject: boolean;
+  isUpcoming?: boolean; // 新增：是否为即将入市项目
   address?: string;
   
   // 新增关键维度

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Building2, Settings, Cloud, History, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Building2, Settings, Cloud, History, CheckCircle2, XCircle, Loader2, Upload, Download } from 'lucide-react';
 import { ViewMode } from '../types';
 
 interface LayoutProps {
@@ -33,7 +33,8 @@ const Layout: React.FC<LayoutProps> = ({
           </h1>
           <p className="text-xs text-slate-400 mt-1">专业办公租赁调研</p>
         </div>
-        <nav className="flex-1 p-4 space-y-2">
+        
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -49,6 +50,32 @@ const Layout: React.FC<LayoutProps> = ({
             </button>
           ))}
         </nav>
+
+        {/* Quick Actions Section */}
+        <div className="px-4 pb-4">
+            <div className="bg-slate-800 rounded-xl p-4 shadow-lg border border-slate-700">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    快捷操作
+                </h4>
+                <div className="space-y-2">
+                    <button 
+                        onClick={onCloudSave}
+                        className="flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shadow-sm group"
+                    >
+                        <Cloud size={14} className="group-hover:scale-110 transition-transform" />
+                        <span>云端一键备份</span>
+                    </button>
+                    <button 
+                        onClick={onCloudHistory}
+                        className="flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium transition-colors group"
+                    >
+                        <History size={14} className="group-hover:scale-110 transition-transform" />
+                        <span>恢复与导入</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 text-center">
             <div className="flex items-center justify-center gap-1 mb-1 text-emerald-500/80">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>

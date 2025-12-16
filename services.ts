@@ -159,12 +159,22 @@ export const deleteCloudBackup = async (fileKey: string, url: string, key: strin
     }
 }
 
-export const restoreFromCloud = async (url: string, key: string, fileKey?: string): Promise<{ success: boolean; data?: AppState; message: string }> => {
+export const restoreFromCloud = async (
+    url: string, 
+    key: string, 
+    fileKey?: string
+): Promise<{ 
+    success: boolean; 
+    data?: AppState; 
+    message: string; 
+    fileMetadata?: { name: string; created_at: string } 
+}> => {
   const client = getSupabase(url, key);
   if (!client) return { success: false, message: '请先配置 Supabase 连接信息' };
 
   try {
     let targetKey = fileKey;
+    let metadata = undefined;
 
     // If no specific file key provided, find the latest
     if (!targetKey) {
@@ -174,7 +184,9 @@ export const restoreFromCloud = async (url: string, key: string, fileKey?: strin
 
         if (listError) throw listError;
         if (!list || list.length === 0) return { success: false, message: '云端无备份文件' };
+        
         targetKey = list[0].name; 
+        metadata = { name: decodeFilename(list[0].name), created_at: list[0].created_at };
     }
 
     const { data: fileData, error: downloadError } = await client.storage
@@ -187,7 +199,7 @@ export const restoreFromCloud = async (url: string, key: string, fileKey?: strin
     const text = await fileData.text();
     const json = JSON.parse(text);
     
-    return { success: true, data: json, message: '恢复成功' };
+    return { success: true, data: json, message: '恢复成功', fileMetadata: metadata };
 
   } catch (error: any) {
     return { success: false, message: error.message || '恢复失败' };
@@ -212,6 +224,40 @@ export const getDownloadUrl = async (fileKey: string, url: string, key: string, 
     }
     return data?.signedUrl || null;
 };
+
+// --- Image Upload Service ---
+
+export const uploadSurveyImage = async (file: File, url: string, key: string): Promise<{ success: boolean; url?: string; message: string }> => {
+    const client = getSupabase(url, key);
+    if (!client) return { success: false, message: '未连接云端' };
+
+    try {
+        const fileExt = file.name.split('.').pop();
+        // Generate a random filename to avoid collisions and encoding issues
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        const { error: uploadError } = await client.storage
+            .from('survey_images')
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false
+            });
+
+        if (uploadError) {
+            if (uploadError.message.includes('Row-level security') || uploadError.message.includes('not found')) {
+                throw new Error('存储桶未创建或权限不足。请在系统设置中运行初始化脚本。');
+            }
+            throw uploadError;
+        }
+
+        const { data } = client.storage.from('survey_images').getPublicUrl(filePath);
+        return { success: true, url: data.publicUrl, message: '上传成功' };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    }
+}
+
 
 // --- Gemini Service ---
 

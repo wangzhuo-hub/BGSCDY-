@@ -37,6 +37,7 @@ export const sanitizeImportedData = (data: any): AppState | null => {
           id: p.id || generateId(),
           name: p.name || '未命名园区',
           isMyProject: !!p.isMyProject,
+          isUpcoming: !!p.isUpcoming, // Sanitize new flag
           address: p.address || '',
           // Sanitize new fields
           totalGrossArea: sanitizeNumber(p.totalGrossArea),
@@ -49,6 +50,8 @@ export const sanitizeImportedData = (data: any): AppState | null => {
                 name: b.name || '楼栋',
                 totalArea: sanitizeNumber(b.totalArea),
                 vacantArea: sanitizeNumber(b.vacantArea),
+                guidancePrice: sanitizeNumber(b.guidancePrice),
+                targetOccupancy: sanitizeNumber(b.targetOccupancy),
               }))
             : [],
           tags: Array.isArray(p.tags) ? p.tags : [],
@@ -70,6 +73,7 @@ export const sanitizeImportedData = (data: any): AppState | null => {
           deliveryStandard: r.deliveryStandard || '',
           trend: ['up', 'down', 'flat'].includes(r.trend) ? r.trend : 'flat',
           remarks: r.remarks || '',
+          images: Array.isArray(r.images) ? r.images.filter((url: any) => typeof url === 'string') : [],
         }))
       : [];
 

@@ -90,9 +90,11 @@ const SettingsAndData: React.FC<Props> = ({ state, onUpdateSettings, onImportDat
   };
 
   // Robust SQL script that drops policies first
-  const sqlScript = `-- 1. 创建 backups 存储桶 (如果不存在)
+  const sqlScript = `-- 1. 创建 backups 和 survey_images 存储桶
 insert into storage.buckets (id, name, public)
-values ('backups', 'backups', true)
+values 
+  ('backups', 'backups', true),
+  ('survey_images', 'survey_images', true)
 on conflict (id) do nothing;
 
 -- 2. 清理旧策略 (确保脚本可重复运行)
@@ -101,11 +103,22 @@ drop policy if exists "Public Access Insert" on storage.objects;
 drop policy if exists "Public Access Delete" on storage.objects;
 drop policy if exists "Public Access Update" on storage.objects;
 
--- 3. 重新创建策略 (允许所有公开访问)
+drop policy if exists "Images Select" on storage.objects;
+drop policy if exists "Images Insert" on storage.objects;
+drop policy if exists "Images Delete" on storage.objects;
+drop policy if exists "Images Update" on storage.objects;
+
+-- 3. 重新创建 backups 策略
 create policy "Public Access Select" on storage.objects for select using ( bucket_id = 'backups' );
 create policy "Public Access Insert" on storage.objects for insert with check ( bucket_id = 'backups' );
 create policy "Public Access Delete" on storage.objects for delete using ( bucket_id = 'backups' );
-create policy "Public Access Update" on storage.objects for update using ( bucket_id = 'backups' );`;
+create policy "Public Access Update" on storage.objects for update using ( bucket_id = 'backups' );
+
+-- 4. 创建 survey_images 策略
+create policy "Images Select" on storage.objects for select using ( bucket_id = 'survey_images' );
+create policy "Images Insert" on storage.objects for insert with check ( bucket_id = 'survey_images' );
+create policy "Images Delete" on storage.objects for delete using ( bucket_id = 'survey_images' );
+create policy "Images Update" on storage.objects for update using ( bucket_id = 'survey_images' );`;
 
   const copySQL = () => {
       navigator.clipboard.writeText(sqlScript);
@@ -202,16 +215,16 @@ create policy "Public Access Update" on storage.objects for update using ( bucke
         <div className="mt-8 border border-blue-100 bg-blue-50/50 rounded-lg overflow-hidden">
             <details className="group" open>
                 <summary className="p-4 bg-blue-50 cursor-pointer font-medium text-blue-700 hover:bg-blue-100 transition-colors flex justify-between items-center">
-                    <span className="flex items-center gap-2"><Database size={16}/> ⚠️ 数据库初始化脚本 (云端备份报错请必读)</span>
+                    <span className="flex items-center gap-2"><Database size={16}/> ⚠️ 数据库初始化脚本 (备份或上传图片报错请必读)</span>
                     <ChevronDown size={16} className="group-open:rotate-180 transition-transform"/>
                 </summary>
                 <div className="p-4">
                     <p className="text-sm text-slate-700 mb-2 font-bold">
-                        为什么会备份失败？
+                        配置说明：
                     </p>
                     <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-                        Supabase 默认禁止读写操作。您必须在数据库中配置“访问策略(Policy)”才能使用云存储。
-                        <br/>如果遇到 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Invalid key</span> 或 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Policy already exists</span> 错误，请按以下步骤操作：
+                        Supabase 默认禁止读写操作。您必须在数据库中配置“访问策略(Policy)”才能使用云存储进行备份和图片上传。
+                        <br/>如果遇到 <span className="font-mono bg-rose-100 text-rose-600 px-1 rounded">Invalid key</span> 或权限错误，请按以下步骤操作：
                     </p>
                     <ol className="list-decimal list-inside text-xs text-slate-600 mb-4 space-y-1">
                         <li>复制下方 SQL 代码。</li>

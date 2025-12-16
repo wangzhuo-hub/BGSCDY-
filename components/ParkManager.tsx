@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Edit2, ChevronRight, X, Search, Save, Calendar, Loader2, TrendingUp, TrendingDown, Minus, Building as BuildingIcon, DollarSign, PieChart, Maximize2, Clock, AlertTriangle } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Plus, Trash2, Edit2, ChevronRight, X, Search, Save, Calendar, Loader2, TrendingUp, TrendingDown, Minus, Building as BuildingIcon, DollarSign, PieChart, Maximize2, Clock, AlertTriangle, Info, Construction, Image as ImageIcon, Camera, Upload } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Park, SurveyRecord, Building, AIEvent, AppSettings } from '../types';
 import { generateId, formatDate, formatMoney } from '../utils';
-import { searchParkEvents } from '../services';
+import { searchParkEvents, uploadSurveyImage } from '../services';
 
 interface ParkManagerProps {
   parks: Park[];
@@ -16,6 +16,7 @@ interface ParkManagerProps {
 const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, setParks, setRecords }) => {
   const [selectedParkId, setSelectedParkId] = useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
   
   // --- Selected Park Logic ---
   const selectedPark = parks.find(p => p.id === selectedParkId);
@@ -131,10 +132,10 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
                     })}
                     {parks.filter(p => p.isMyProject).length === 0 && <p className="px-4 text-xs text-slate-400">暂无本案项目</p>}
                 </div>
-                {/* Competitors */}
+                {/* Active Competitors (Stock) */}
                 <div>
-                    <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">竞品园区</h4>
-                    {parks.filter(p => !p.isMyProject).map(park => {
+                    <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">存量竞品</h4>
+                    {parks.filter(p => !p.isMyProject && !p.isUpcoming).map(park => {
                          const parkRecs = records.filter(r => r.parkId === park.id);
                          const lastRec = parkRecs.length > 0 
                             ? parkRecs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
@@ -149,6 +150,29 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
                             />
                          );
                     })}
+                </div>
+                
+                {/* Upcoming Projects */}
+                <div>
+                    <h4 className="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4 flex items-center gap-2">
+                        <Construction size={12}/> 即将入市 / 未来供应
+                    </h4>
+                    {parks.filter(p => !p.isMyProject && p.isUpcoming).map(park => {
+                         const parkRecs = records.filter(r => r.parkId === park.id);
+                         const lastRec = parkRecs.length > 0 
+                            ? parkRecs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+                            : null;
+                         return (
+                            <ParkCard 
+                                key={park.id} 
+                                park={park} 
+                                isActive={selectedParkId === park.id} 
+                                onClick={() => setSelectedParkId(park.id)} 
+                                lastUpdate={lastRec?.date}
+                            />
+                         );
+                    })}
+                     {parks.filter(p => !p.isMyProject && p.isUpcoming).length === 0 && <p className="px-4 text-xs text-slate-400 italic mt-1">暂无未来供应数据</p>}
                 </div>
             </div>
         </div>
@@ -165,6 +189,7 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
                     onDelete={() => handleDeletePark(selectedPark.id)}
                     onBack={() => setSelectedParkId(null)}
                     onUpdateRecords={setRecords}
+                    onViewImage={setViewerImage}
                 />
             ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
@@ -181,6 +206,16 @@ const ParkManager: React.FC<ParkManagerProps> = ({ parks, records, settings, set
           onClose={() => setIsEditModalOpen(false)} 
           onSave={handleSavePark} 
         />
+      )}
+
+      {/* Image Viewer Overlay */}
+      {viewerImage && (
+          <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center" onClick={() => setViewerImage(null)}>
+              <button className="absolute top-4 right-4 text-white hover:text-slate-300">
+                  <X size={32}/>
+              </button>
+              <img src={viewerImage} alt="Large view" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+          </div>
       )}
     </div>
   );
@@ -212,12 +247,13 @@ const ParkCard: React.FC<{ park: Park, isActive: boolean, onClick: () => void, l
                     <p className="text-xs text-slate-500 mt-1">{park.address || '地址未填'}</p>
                 </div>
                 {park.isMyProject && <span className="bg-blue-100 text-blue-600 text-[10px] px-1.5 py-0.5 rounded font-bold">本案</span>}
+                {park.isUpcoming && !park.isMyProject && <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold">即将入市</span>}
             </div>
             
             {/* Key Metrics in Card */}
             <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-dashed border-slate-100">
                 <div className="text-center">
-                    <div className="text-[10px] text-slate-400">租金</div>
+                    <div className="text-[10px] text-slate-400">{park.isUpcoming ? '预租报价' : '租金'}</div>
                     <div className="text-xs font-medium text-slate-700">{park.guidancePrice ? `¥${park.guidancePrice}` : '-'}</div>
                 </div>
                 <div className="text-center">
@@ -260,7 +296,7 @@ const ParkCard: React.FC<{ park: Park, isActive: boolean, onClick: () => void, l
     );
 };
 
-const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onBack, onUpdateRecords }: any) => {
+const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onBack, onUpdateRecords, onViewImage }: any) => {
     const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
     const [editingRecord, setEditingRecord] = useState<SurveyRecord | undefined>(undefined);
     const [aiEvents, setAiEvents] = useState<AIEvent[]>([]);
@@ -303,6 +339,7 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                         <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                             {park.name}
                             {park.isMyProject && <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full">本案</span>}
+                            {park.isUpcoming && <span className="bg-amber-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1"><Construction size={10}/>即将入市</span>}
                         </h2>
                         <p className="text-slate-500 text-sm mt-1">{park.address}</p>
                     </div>
@@ -317,7 +354,7 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                     <div className="bg-slate-50 p-3 rounded-lg flex items-center gap-3">
                         <div className="p-2 bg-blue-100 text-blue-600 rounded-full"><DollarSign size={16}/></div>
                         <div>
-                            <div className="text-xs text-slate-500">指导租金</div>
+                            <div className="text-xs text-slate-500">{park.isUpcoming ? '指导/预租报价' : '指导租金'}</div>
                             <div className="font-bold text-slate-800">{park.guidancePrice ? formatMoney(park.guidancePrice) : '-'}</div>
                         </div>
                     </div>
@@ -331,7 +368,7 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                     <div className="bg-slate-50 p-3 rounded-lg flex items-center gap-3">
                          <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full"><PieChart size={16}/></div>
                         <div>
-                            <div className="text-xs text-slate-500">当前出租率</div>
+                            <div className="text-xs text-slate-500">{park.isUpcoming ? '当前预租率' : '当前出租率'}</div>
                             <div className="font-bold text-slate-800">{park.baselineOccupancy ? park.baselineOccupancy + '%' : '-'}</div>
                         </div>
                     </div>
@@ -415,6 +452,7 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                                     <th className="px-4 py-2">日期</th>
                                     <th className="px-4 py-2">单价</th>
                                     <th className="px-4 py-2">出租率</th>
+                                    <th className="px-4 py-2">照片</th>
                                     <th className="px-4 py-2">政策</th>
                                     <th className="px-4 py-2">备注</th>
                                     <th className="px-4 py-2 w-16">操作</th>
@@ -426,6 +464,28 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                                         <td className="px-4 py-2">{formatDate(rec.date)}</td>
                                         <td className="px-4 py-2 font-medium">{formatMoney(rec.price)}</td>
                                         <td className="px-4 py-2">{rec.occupancyRate}%</td>
+                                        <td className="px-4 py-2">
+                                            {rec.images && rec.images.length > 0 ? (
+                                                <div className="flex -space-x-2">
+                                                    {rec.images.slice(0, 3).map((img, idx) => (
+                                                        <img 
+                                                            key={idx} 
+                                                            src={img} 
+                                                            onClick={(e) => { e.stopPropagation(); onViewImage(img); }}
+                                                            className="w-8 h-8 rounded-full border-2 border-white object-cover cursor-pointer hover:z-10 transition-transform hover:scale-110" 
+                                                            alt="调研照片"
+                                                        />
+                                                    ))}
+                                                    {rec.images.length > 3 && (
+                                                        <div className="w-8 h-8 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-[10px] text-slate-500">
+                                                            +{rec.images.length - 3}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300"><ImageIcon size={16}/></span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-2 max-w-[120px] truncate">{rec.commissionPolicy}</td>
                                         <td className="px-4 py-2 max-w-[150px] truncate text-slate-500">{rec.remarks}</td>
                                         <td className="px-4 py-2">
@@ -448,6 +508,7 @@ const ParkDetail = ({ park, records, allRecords, settings, onEdit, onDelete, onB
                     initialData={editingRecord}
                     defaultSurveyor={settings.surveyorName}
                     buildings={park.buildings}
+                    supabaseSettings={{ url: settings.supabaseUrl, key: settings.supabaseKey }}
                     onClose={() => setIsRecordModalOpen(false)}
                     onSave={handleSaveRecord}
                 />
@@ -463,6 +524,7 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
         id: generateId(),
         name: '',
         isMyProject: false,
+        isUpcoming: false,
         address: '',
         totalGrossArea: 0,
         guidancePrice: 0,
@@ -476,13 +538,32 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
     const addBuilding = () => {
         setFormData({
             ...formData,
-            buildings: [...formData.buildings, { id: generateId(), name: '新楼栋', totalArea: 0, vacantArea: 0 }]
+            buildings: [...formData.buildings, { 
+                id: generateId(), 
+                name: `楼栋${formData.buildings.length + 1}`, 
+                totalArea: 0, 
+                vacantArea: 0,
+                guidancePrice: 0,
+                targetOccupancy: 100 
+            }]
         });
     };
 
-    const updateBuilding = (index: number, field: string, val: any) => {
+    const updateBuilding = (index: number, field: keyof Building, val: any) => {
         const newBuildings = [...formData.buildings];
         newBuildings[index] = { ...newBuildings[index], [field]: val };
+        
+        // Auto-calculate vacantArea if totalArea or targetOccupancy changes
+        if (field === 'totalArea' || field === 'targetOccupancy') {
+            const area = field === 'totalArea' ? val : newBuildings[index].totalArea;
+            const occ = field === 'targetOccupancy' ? val : (newBuildings[index].targetOccupancy || 0);
+            
+            if (area > 0 && occ >= 0) {
+                const calculatedVacancy = area * (1 - occ / 100);
+                newBuildings[index].vacantArea = Math.round(calculatedVacancy);
+            }
+        }
+
         setFormData({ ...formData, buildings: newBuildings });
     };
 
@@ -492,7 +573,7 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
                     <h3 className="text-xl font-bold">{initialData ? '编辑园区' : '新增园区'}</h3>
                     <button onClick={onClose}><X size={24} className="text-slate-400 hover:text-slate-600"/></button>
@@ -517,7 +598,9 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
                                 onChange={e => setFormData({...formData, address: e.target.value})}
                             />
                         </label>
-                        <div className="flex items-center gap-2 mt-2 col-span-2 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        
+                        {/* Flags */}
+                        <div className="flex items-center gap-2 mt-2 col-span-1 bg-blue-50 p-3 rounded-lg border border-blue-100">
                             <input 
                                 type="checkbox" 
                                 id="isMyProject" 
@@ -525,14 +608,24 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
                                 onChange={e => setFormData({...formData, isMyProject: e.target.checked})}
                                 className="w-5 h-5 text-blue-600 rounded"
                             />
-                            <label htmlFor="isMyProject" className="text-sm font-bold text-slate-700 cursor-pointer select-none ml-2">设为本案项目 (高亮显示)</label>
+                            <label htmlFor="isMyProject" className="text-sm font-bold text-slate-700 cursor-pointer select-none ml-2">本案项目</label>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2 col-span-1 bg-amber-50 p-3 rounded-lg border border-amber-100">
+                            <input 
+                                type="checkbox" 
+                                id="isUpcoming" 
+                                checked={formData.isUpcoming} 
+                                onChange={e => setFormData({...formData, isUpcoming: e.target.checked})}
+                                className="w-5 h-5 text-amber-600 rounded"
+                            />
+                            <label htmlFor="isUpcoming" className="text-sm font-bold text-slate-700 cursor-pointer select-none ml-2">即将入市 (未来供应)</label>
                         </div>
                     </div>
                     
                     {/* Key Metrics Inputs */}
                     <div className="grid grid-cols-3 gap-4 border-t border-b border-slate-100 py-4">
                         <label className="block">
-                            <span className="text-xs font-bold text-slate-600">指导租金 (元/㎡/天)</span>
+                            <span className="text-xs font-bold text-slate-600">整体指导租金 (元/㎡/天)</span>
                             <input 
                                 type="number" step="0.1"
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm" 
@@ -542,7 +635,7 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
                             />
                         </label>
                         <label className="block">
-                            <span className="text-xs font-bold text-slate-600">总建筑面积 (㎡)</span>
+                            <span className="text-xs font-bold text-slate-600">园区总建筑面积 (㎡)</span>
                             <input 
                                 type="number" 
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm" 
@@ -552,7 +645,7 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
                             />
                         </label>
                         <label className="block">
-                            <span className="text-xs font-bold text-slate-600">基准出租率 (%)</span>
+                            <span className="text-xs font-bold text-slate-600">整体基准出租率 (%)</span>
                             <input 
                                 type="number" step="0.1" max="100"
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm" 
@@ -597,22 +690,85 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
                          </div>
                     </div>
 
-                    {/* Buildings */}
-                    <div>
-                         <div className="flex justify-between items-center mb-2">
-                             <span className="text-sm font-medium text-slate-700">楼栋明细 (可选)</span>
-                             <button type="button" onClick={addBuilding} className="text-xs text-blue-600 hover:underline">+ 添加楼栋</button>
+                    {/* Buildings Section */}
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                         <div className="flex justify-between items-center mb-3">
+                             <div>
+                                 <h4 className="font-bold text-slate-700 flex items-center gap-2"><BuildingIcon size={16}/> 楼栋明细</h4>
+                                 <p className="text-xs text-slate-500">请详细录入各楼栋指标，用于精确测算去化压力</p>
+                             </div>
+                             <button type="button" onClick={addBuilding} className="text-xs bg-white border border-blue-200 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-50 shadow-sm font-medium transition-colors">
+                                 + 新增楼栋
+                             </button>
                          </div>
-                         <div className="space-y-2 max-h-48 overflow-y-auto border rounded p-2 bg-slate-50">
+                         
+                         {/* Header Row */}
+                         <div className="grid grid-cols-12 gap-2 text-xs font-bold text-slate-500 mb-2 px-1">
+                             <div className="col-span-3">楼栋号/名称 *</div>
+                             <div className="col-span-2 text-center">总面积(㎡) *</div>
+                             <div className="col-span-2 text-center">指导租金(元)</div>
+                             <div className="col-span-2 text-center">预计出租率(%)</div>
+                             <div className="col-span-2 text-center">空置(㎡)</div>
+                             <div className="col-span-1"></div>
+                         </div>
+
+                         <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                              {formData.buildings.map((b, i) => (
-                                 <div key={b.id} className="flex gap-2 items-center text-sm">
-                                     <input value={b.name} onChange={e => updateBuilding(i, 'name', e.target.value)} className="w-20 border rounded px-1" placeholder="楼栋名"/>
-                                     <input type="number" value={b.totalArea} onChange={e => updateBuilding(i, 'totalArea', parseFloat(e.target.value))} className="w-24 border rounded px-1" placeholder="总面积"/>
-                                     <input type="number" value={b.vacantArea} onChange={e => updateBuilding(i, 'vacantArea', parseFloat(e.target.value))} className="w-24 border rounded px-1" placeholder="空置"/>
-                                     <button onClick={() => removeBuilding(i)} className="text-rose-500">×</button>
+                                 <div key={b.id} className="grid grid-cols-12 gap-2 items-center text-sm bg-white p-2 rounded border border-slate-200 shadow-sm">
+                                     <div className="col-span-3">
+                                        <input 
+                                            value={b.name} 
+                                            onChange={e => updateBuilding(i, 'name', e.target.value)} 
+                                            className="w-full border-b border-dashed border-slate-300 focus:border-blue-500 outline-none px-1 py-1" 
+                                            placeholder="楼栋名"
+                                        />
+                                     </div>
+                                     <div className="col-span-2">
+                                        <input 
+                                            type="number" 
+                                            value={b.totalArea || ''} 
+                                            onChange={e => updateBuilding(i, 'totalArea', parseFloat(e.target.value))} 
+                                            className="w-full text-center bg-slate-50 rounded px-1 py-1 text-xs" 
+                                            placeholder="0"
+                                        />
+                                     </div>
+                                     <div className="col-span-2">
+                                        <input 
+                                            type="number" step="0.1"
+                                            value={b.guidancePrice || ''} 
+                                            onChange={e => updateBuilding(i, 'guidancePrice', parseFloat(e.target.value))} 
+                                            className="w-full text-center bg-slate-50 rounded px-1 py-1 text-xs" 
+                                            placeholder="0.0"
+                                        />
+                                     </div>
+                                     <div className="col-span-2 relative">
+                                        <input 
+                                            type="number" max="100"
+                                            value={b.targetOccupancy || ''} 
+                                            onChange={e => updateBuilding(i, 'targetOccupancy', parseFloat(e.target.value))} 
+                                            className="w-full text-center bg-slate-50 rounded px-1 py-1 text-xs" 
+                                            placeholder="100"
+                                        />
+                                     </div>
+                                     <div className="col-span-2">
+                                        <input 
+                                            type="number" 
+                                            value={b.vacantArea || ''} 
+                                            onChange={e => updateBuilding(i, 'vacantArea', parseFloat(e.target.value))} 
+                                            className="w-full text-center bg-orange-50 text-orange-600 font-medium rounded px-1 py-1 text-xs" 
+                                            placeholder="自动计算"
+                                        />
+                                     </div>
+                                     <div className="col-span-1 text-right">
+                                        <button onClick={() => removeBuilding(i)} className="text-slate-300 hover:text-rose-500 transition-colors"><X size={16}/></button>
+                                     </div>
                                  </div>
                              ))}
-                             {formData.buildings.length === 0 && <p className="text-xs text-slate-400 text-center py-2">暂无楼栋数据</p>}
+                             {formData.buildings.length === 0 && (
+                                 <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+                                     <p className="text-xs text-slate-400">暂无楼栋数据，请点击上方按钮添加</p>
+                                 </div>
+                             )}
                          </div>
                     </div>
                 </div>
@@ -627,7 +783,7 @@ const ParkFormModal = ({ initialData, onClose, onSave }: any) => {
     );
 };
 
-const RecordFormModal = ({ parkId, initialData, defaultSurveyor, buildings, onClose, onSave }: any) => {
+const RecordFormModal = ({ parkId, initialData, defaultSurveyor, buildings, supabaseSettings, onClose, onSave }: any) => {
     const [formData, setFormData] = useState<SurveyRecord>(initialData || {
         id: generateId(),
         parkId,
@@ -639,13 +795,46 @@ const RecordFormModal = ({ parkId, initialData, defaultSurveyor, buildings, onCl
         commissionPolicy: '',
         deliveryStandard: '',
         trend: 'flat',
-        remarks: ''
+        remarks: '',
+        images: []
     });
+    
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        setIsUploading(true);
+        const newImages = [...(formData.images || [])];
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const { success, url, message } = await uploadSurveyImage(file, supabaseSettings.url, supabaseSettings.key);
+            
+            if (success && url) {
+                newImages.push(url);
+            } else {
+                alert(`上传 ${file.name} 失败: ${message}`);
+            }
+        }
+        
+        setFormData({ ...formData, images: newImages });
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const removeImage = (index: number) => {
+        const newImages = [...(formData.images || [])];
+        newImages.splice(index, 1);
+        setFormData({ ...formData, images: newImages });
+    };
 
     return (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-                <div className="p-4 border-b flex justify-between items-center">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                <div className="p-4 border-b flex justify-between items-center bg-slate-50 sticky top-0 z-10">
                     <h3 className="font-bold">{initialData ? '编辑记录' : '新增调研记录'}</h3>
                     <button onClick={onClose}><X size={20}/></button>
                 </div>
@@ -685,12 +874,48 @@ const RecordFormModal = ({ parkId, initialData, defaultSurveyor, buildings, onCl
                         <span className="text-xs text-slate-500">佣金政策</span>
                         <input value={formData.commissionPolicy} onChange={e => setFormData({...formData, commissionPolicy: e.target.value})} className="w-full border rounded p-2 mt-1" placeholder="如：2.4+2"/>
                     </label>
+                    
+                    {/* Image Upload Section */}
+                    <div>
+                        <span className="text-xs text-slate-500 block mb-2">现场照片</span>
+                        <div className="grid grid-cols-4 gap-2">
+                            {formData.images?.map((url, index) => (
+                                <div key={index} className="relative group aspect-square rounded-lg overflow-hidden border border-slate-200">
+                                    <img src={url} alt={`img-${index}`} className="w-full h-full object-cover" />
+                                    <button 
+                                        onClick={() => removeImage(index)}
+                                        className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 hover:bg-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                    >
+                                        <X size={12}/>
+                                    </button>
+                                </div>
+                            ))}
+                            <button 
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                                className="aspect-square rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors bg-slate-50"
+                            >
+                                {isUploading ? <Loader2 size={20} className="animate-spin"/> : <Camera size={20}/>}
+                                <span className="text-[10px] mt-1">{isUploading ? '上传中' : '添加照片'}</span>
+                            </button>
+                        </div>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            onChange={handleFileChange} 
+                            accept="image/*" 
+                            multiple 
+                            className="hidden" 
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">需先连接云端并在“系统设置”初始化存储桶才能上传</p>
+                    </div>
+
                     <label className="block">
                         <span className="text-xs text-slate-500">备注</span>
                         <textarea value={formData.remarks} onChange={e => setFormData({...formData, remarks: e.target.value})} className="w-full border rounded p-2 mt-1" rows={3}/>
                     </label>
                 </div>
-                 <div className="p-4 border-t flex justify-end gap-3">
+                 <div className="p-4 border-t flex justify-end gap-3 sticky bottom-0 bg-white">
                     <button onClick={onClose} className="px-4 py-2 text-slate-600">取消</button>
                     <button onClick={() => onSave(formData)} className="px-4 py-2 bg-blue-600 text-white rounded-lg">保存</button>
                 </div>

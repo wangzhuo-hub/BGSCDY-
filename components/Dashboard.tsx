@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
   ComposedChart, Line, Area
 } from 'recharts';
-import { TrendingUp, TrendingDown, Minus, AlertCircle, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, AlertCircle, Calendar, Construction } from 'lucide-react';
 import { Park, SurveyRecord } from '../types';
 import { formatMoney } from '../utils';
 
@@ -15,16 +15,20 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
   // --- Data Processing ---
   const myPark = parks.find(p => p.isMyProject);
-  const competitors = parks.filter(p => !p.isMyProject);
+  
+  // Separate Stock (Active) vs Upcoming (Future)
+  // Competitors = Not My Project AND Not Upcoming
+  const stockCompetitors = parks.filter(p => !p.isMyProject && !p.isUpcoming);
+  const upcomingSupply = parks.filter(p => p.isUpcoming && !p.isMyProject);
 
-  // Helper: Get statistics for all competitors at a specific point in time
+  // Helper: Get statistics for all STOCK competitors at a specific point in time
   const getMarketStatsAtDate = (targetDate: Date) => {
     let totalPrice = 0;
     let totalOccupancy = 0;
     let count = 0;
     let totalVacantArea = 0;
 
-    competitors.forEach(comp => {
+    stockCompetitors.forEach(comp => {
       // Find the latest record on or before targetDate
       const rec = records
         .filter(r => r.parkId === comp.id && new Date(r.date) <= targetDate)
@@ -113,12 +117,12 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
   // --- Charts Data (Comparison) ---
   const priceData = [
     { name: '本案项目', value: myRecord?.price || 0, type: 'mine' },
-    { name: '竞品平均', value: currentStats.avgPrice, type: 'comp' }
+    { name: '存量竞品平均', value: currentStats.avgPrice, type: 'comp' }
   ];
 
   const occupancyData = [
     { name: '本案项目', value: myRecord?.occupancyRate || 0, type: 'mine' },
-    { name: '竞品平均', value: currentStats.avgOccupancy, type: 'comp' }
+    { name: '存量竞品平均', value: currentStats.avgOccupancy, type: 'comp' }
   ];
 
   // --- Policy Trends ---
@@ -180,7 +184,7 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       <header>
         <h2 className="text-2xl font-bold text-slate-800">市场概览 Dashboard</h2>
-        <p className="text-slate-500 text-sm">数据截止: {new Date().toLocaleDateString('zh-CN')}</p>
+        <p className="text-slate-500 text-sm">数据截止: {new Date().toLocaleDateString('zh-CN')} (统计不含即将入市项目)</p>
       </header>
 
       {/* KPI Cards */}
@@ -255,7 +259,7 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Calendar size={20} className="text-blue-500"/> 市场核心指标走势 (Market Trends)
+                <Calendar size={20} className="text-blue-500"/> 市场核心指标走势 (不含未来供应)
             </h3>
             <div className="flex gap-4 text-xs">
                 <div className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-500 rounded-sm"></span> 平均租金</div>
@@ -348,10 +352,10 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
         </div>
       </div>
 
-      {/* Market List */}
+      {/* Market List (Stock) */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-            <h3 className="font-bold text-slate-800">市场监测总表</h3>
+        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 className="font-bold text-slate-800">市场监测总表 (存量)</h3>
             <div className="text-xs text-slate-400">
                 市场热点：
                 {topPolicies.map(([tag], i) => (
@@ -372,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {[myPark, ...competitors].filter(Boolean).map((park) => {
+              {[myPark, ...stockCompetitors].filter(Boolean).map((park) => {
                   // Logic here is consistent with the getMarketStatsAtDate function
                   const rec = records
                     .filter(r => r.parkId === park!.id)
@@ -410,6 +414,60 @@ const Dashboard: React.FC<DashboardProps> = ({ parks, records }) => {
           </table>
         </div>
       </div>
+
+      {/* Upcoming Supply Monitor */}
+      {upcomingSupply.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden mt-8">
+            <div className="px-6 py-4 border-b border-amber-100 flex justify-between items-center bg-amber-50">
+                <h3 className="font-bold text-amber-900 flex items-center gap-2">
+                    <Construction size={18} /> 未来供应监测 (即将入市)
+                </h3>
+                <span className="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full">
+                    不计入上表统计
+                </span>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                    <thead className="bg-amber-50/50 text-amber-900/60">
+                    <tr>
+                        <th className="px-6 py-3 font-medium">项目名称</th>
+                        <th className="px-6 py-3 font-medium">地址</th>
+                        <th className="px-6 py-3 font-medium">总建筑面积 (供应量)</th>
+                        <th className="px-6 py-3 font-medium">预租报价</th>
+                        <th className="px-6 py-3 font-medium">预租率</th>
+                        <th className="px-6 py-3 font-medium">备注</th>
+                    </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                    {upcomingSupply.map((park) => {
+                        const rec = records
+                            .filter(r => r.parkId === park.id)
+                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+
+                        return (
+                            <tr key={park.id} className="hover:bg-amber-50/30">
+                                <td className="px-6 py-4 font-medium text-slate-800">{park.name}</td>
+                                <td className="px-6 py-4 text-slate-500 text-xs">{park.address || '-'}</td>
+                                <td className="px-6 py-4 font-bold text-slate-700">
+                                    {park.totalGrossArea ? (park.totalGrossArea / 10000).toFixed(1) + ' 万㎡' : '-'}
+                                </td>
+                                <td className="px-6 py-4 text-slate-600">
+                                    {park.guidancePrice ? formatMoney(park.guidancePrice) : (rec ? formatMoney(rec.price) : '-')}
+                                </td>
+                                <td className="px-6 py-4 text-slate-600">
+                                    {park.baselineOccupancy ? park.baselineOccupancy + '%' : (rec ? rec.occupancyRate + '%' : '-')}
+                                </td>
+                                <td className="px-6 py-4 text-slate-400 text-xs">
+                                    {park.description || '待入市'}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                    </tbody>
+                </table>
+            </div>
+          </div>
+      )}
     </div>
   );
 };
